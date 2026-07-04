@@ -15,10 +15,12 @@ class LiveRenderer:
         self.window_name = window_name
         self.width = 256
         self.height = 240
+        # Pre-initialize the window so properties are immediately valid to the OS
+        cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
 
     def render_frame(
         self, frame: np.ndarray, perception: FramePerception, q_values: List[float]
-    ) -> None:
+    ) -> bool:
         self._validate_inputs(frame, q_values)
         
         vision_img = self._draw_agent_vision(perception)
@@ -28,7 +30,24 @@ class LiveRenderer:
         composite = np.hstack((frame, vision_img, q_chart_img))
         
         cv2.imshow(self.window_name, composite)
-        cv2.waitKey(1)
+        
+        # 1ms delay allows OpenCV to process GUI events (including the 'X' button)
+        key = cv2.waitKey(1) & 0xFF
+        if key == 27 or key == ord('q'):
+            return False # User pressed ESC or 'q'
+            
+        # NATIVE X-BUTTON DETECTION
+        # WND_PROP_VISIBLE is completely broken on some Linux Qt backends and always returns -1.
+        # Instead, we check WND_PROP_AUTOSIZE. Because we initialized the window with WINDOW_AUTOSIZE,
+        # it returns 1.0 as long as the window exists, and -1.0 the moment the 'X' button is clicked.
+        try:
+            if cv2.getWindowProperty(self.window_name, cv2.WND_PROP_AUTOSIZE) < 0:
+                return False
+        except cv2.error as e:
+            # If the C++ window handle is fully destroyed, getting a property throws an error
+            return False
+            
+        return True
 
     def _validate_inputs(self, frame: np.ndarray, q_values: List[float]) -> None:
         if not isinstance(frame, np.ndarray):
@@ -182,11 +201,11 @@ class DashboardManager:
 
     def tick_realtime(
         self, frame: np.ndarray, perception: FramePerception, q_values: List[float]
-    ) -> None:
+    ) -> bool:
         """Called every frame to update the fast CV2 UI."""
         if self.headless:
-            return
-        self.live_renderer.render_frame(frame, perception, q_values)
+            return True
+        return self.live_renderer.render_frame(frame, perception, q_values)
 
     def tick_episode(self, history: TelemetryHistory) -> None:
         """Called only at the end of an episode to update charts."""

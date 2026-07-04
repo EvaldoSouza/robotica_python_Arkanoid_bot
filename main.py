@@ -66,6 +66,7 @@ class ArkanoidOrchestrator:
         self.dashboard = dashboard
         
         self.frame_skip = 4
+        self.is_running = True
         self.stats = EpisodeTelemetry()
         self.history = TelemetryHistory([], [], [], [], [], [], [])
         self.memory_snapshot: bytes = b""
@@ -78,8 +79,16 @@ class ArkanoidOrchestrator:
 
     def execute_loop(self, max_frames: int = 1000000) -> None:
         cli_logger.info(f"Starting Arkanoid lifecycle in {self.mode.value} mode.")
-        for frame_idx in range(max_frames):
-            self._process_single_frame(frame_idx)
+        try:
+            for frame_idx in range(max_frames):
+                if not self.is_running:
+                    cli_logger.info("UI closed. Terminating loop gracefully.")
+                    break
+                self._process_single_frame(frame_idx)
+        except KeyboardInterrupt:
+            cli_logger.info("Keyboard interrupt (Ctrl+C) detected. Exiting...")
+        finally:
+            self.emulator.hard_reset()
 
     def _process_single_frame(self, frame_idx: int) -> None:
         level_saved = bool(self.memory_snapshot)
@@ -203,7 +212,10 @@ class ArkanoidOrchestrator:
         if frame_idx % 5 == 0 or reward != 0:
             curr_state = self.brain.discretizer.discretize(perception)
             q_vals = self.brain.policy.q_table[curr_state].tolist()
-            self.dashboard.tick_realtime(frame, perception, q_vals)
+            
+            keep_running = self.dashboard.tick_realtime(frame, perception, q_vals)
+            if not keep_running:
+                self.is_running = False
 
     def _shift_historical_state(self, perception: FramePerception, next_action: int) -> None:
         self.prev_perception = perception
