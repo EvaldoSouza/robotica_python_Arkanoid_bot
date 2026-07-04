@@ -1,2 +1,48 @@
-__pycache__/
-*.py[cod]
+# --- Virtual Environments ---
+# Never commit your environment; others should install dependencies from requirements.txt
+.venv/
+venv/
+env/
+ENV/
+
+# --- Environment Variables / Secrets ---
+# NEVER commit credentials, API keys, or database passwords
+.env
+.env.local
+.env.*
+*.env
+
+# --- Operating System & IDE Garbage ---
+# macOS specific files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows specific files
+Thumbs.db
+ehthumbs.db
+
+# VS Code and PyCharm configuration folders
+.vscode/
+.idea/
+
+# --- Testing & Code Quality ---
+# Build and distribution directories
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+
+# Testing reports and caches
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
