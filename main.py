@@ -44,114 +44,61 @@ class EpisodeTelemetry:
     blocks_destroyed: int = 0
     action_jitters: int = 0
 
-
-class ArkanoidOrchestrator:
+class TelemetryTracker:
     """
-    Manages the lifecycle, timing, and integration of the Arkanoid agent.
-    Delegates all heavy lifting to the injected domain modules.
+    Encapsulates all domain rules for tracking game state, scoring,
+    and detecting specific agent behaviors like jitter or paddle hits.
     """
-
-    def __init__(
-        self,
-        mode: ExecutionMode,
-        emulator: NesEnvironment,
-        vision: VisionPipeline,
-        brain: ArkanoidBrain,
-        dashboard: DashboardManager,
-    ) -> None:
-        self.mode = mode
-        self.emulator = emulator
-        self.vision = vision
-        self.brain = brain
-        self.dashboard = dashboard
-        
-        self.frame_skip = 4
-        self.is_running = True
+    def __init__(self) -> None:
         self.stats = EpisodeTelemetry()
         self.history = TelemetryHistory([], [], [], [], [], [], [])
-        self.memory_snapshot: bytes = b""
-        
         self.ball_absence_counter = 0
         self.prev_action = 0
         self.prev_prev_action = 0
         self.prev_perception: Optional[FramePerception] = None
         self.block_buffer: list[int] = []
 
-    def execute_loop(self, max_frames: int = 1000000) -> None:
-        cli_logger.info(f"Starting Arkanoid lifecycle in {self.mode.value} mode.")
-        try:
-            for frame_idx in range(max_frames):
-                if not self.is_running:
-                    cli_logger.info("UI closed. Terminating loop gracefully.")
-                    break
-                self._process_single_frame(frame_idx)
-        except KeyboardInterrupt:
-            cli_logger.info("Keyboard interrupt (Ctrl+C) detected. Exiting...")
-        finally:
-            self.emulator.hard_reset()
+    def reset_episode(self) -> None:
+        self.stats = EpisodeTelemetry()
+        self.prev_perception = None
+        self.prev_action = 0
+        self.prev_prev_action = 0
+        self.ball_absence_counter = 0
+        self.block_buffer.clear()
 
-    def _process_single_frame(self, frame_idx: int) -> None:
-        level_saved = bool(self.memory_snapshot)
-        self.emulator.apply_input(self.prev_action, self.frame_skip, frame_idx, level_saved)
-        frame_matrix = self.emulator.extract_frame()
-        
-        perception = self.vision.process_game_frame(frame_matrix)
-        self._ensure_level_checkpoint(perception)
-        
-        reward = self._compute_instant_reward(perception)
-        if reward <= -100.0:
-            self._handle_agent_death(reward)
-            return
-
-        self._update_survival_metrics(perception, reward)
-        next_action = self._determine_next_action(perception, reward)
-        
-        self._render_output_if_needed(frame_idx, frame_matrix, perception, reward)
-        self._shift_historical_state(perception, next_action)
-
-    def _ensure_level_checkpoint(self, perception: FramePerception) -> None:
-        if self.memory_snapshot:
-            return
-            
-        objects_present = perception.ball is not None and perception.paddle is not None
-        if objects_present:
-            self.memory_snapshot = self.emulator.capture_memory_state()
-            self._reset_debounce_buffer(perception.block_count)
-            cli_logger.info("Level active. Captured emulator memory state.")
-
-    def _reset_debounce_buffer(self, initial_count: int) -> None:
+    def reset_debounce_buffer(self, initial_count: int) -> None:
         self.block_buffer = [initial_count] * 10
         self.stats = EpisodeTelemetry()
 
-    def _compute_instant_reward(self, perception: FramePerception) -> float:
-        if not self.memory_snapshot:
-            return 0.0
-            
+    def update_absence_counter(self, perception: FramePerception) -> None:
         if perception.ball is None:
             self.ball_absence_counter += 1
         else:
             self.ball_absence_counter = 0
-            
-        return self.brain.calculate_reward(
-            perception, self.ball_absence_counter, self.prev_action, self.prev_prev_action
-        )
 
-    def _handle_agent_death(self, terminal_penalty: float) -> None:
-        if self.prev_perception is not None and self.mode != ExecutionMode.SHOWCASE:
-            old_state = self.brain.discretizer.discretize(self.prev_perception)
-            self.brain.apply_terminal_penalty(old_state, self.prev_action, terminal_penalty)
-            
-        self._log_episode_completion()
-        self._revert_environment_state()
-
-    def _update_survival_metrics(self, perception: FramePerception, reward: float) -> None:
+    def record_step(self, perception: FramePerception, reward: float, level_saved: bool) -> None:
         self.stats.steps_survived += 1
         self.stats.accumulated_reward += reward
         self._detect_action_jitter()
         
-        if self.memory_snapshot:
+        if level_saved:
             self._tally_broken_blocks(perception.block_count)
             self._detect_paddle_hit(perception)
+
+    def finalize_episode(self, epsilon: float) -> EpisodeTelemetry:
+        self.history.episodes.append(len(self.history.episodes) + 1)
+        self.history.rewards.append(self.stats.accumulated_reward)
+        self.history.survival_frames.append(self.stats.steps_survived)
+        self.history.blocks_destroyed.append(self.stats.blocks_destroyed)
+        self.history.paddle_hits.append(self.stats.paddle_hits)
+        self.history.epsilons.append(epsilon)
+        self.history.jitters.append(self.stats.action_jitters)
+        return self.stats
+        
+    def shift_historical_state(self, perception: FramePerception, next_action: int) -> None:
+        self.prev_perception = perception
+        self.prev_prev_action = self.prev_action
+        self.prev_action = next_action
 
     def _detect_action_jitter(self) -> None:
         jitter_pattern_a = (self.prev_action == 1 and self.prev_prev_action == 2)
@@ -188,6 +135,94 @@ class ArkanoidOrchestrator:
         if was_falling and is_rising and is_near_bottom:
             self.stats.paddle_hits += 1
 
+
+class ArkanoidOrchestrator:
+    """
+    Manages the lifecycle, timing, and integration of the Arkanoid agent.
+    Delegates all heavy lifting to the injected domain modules.
+    """
+
+    def __init__(
+        self,
+        mode: ExecutionMode,
+        emulator: NesEnvironment,
+        vision: VisionPipeline,
+        brain: ArkanoidBrain,
+        dashboard: DashboardManager,
+    ) -> None:
+        self.mode = mode
+        self.emulator = emulator
+        self.vision = vision
+        self.brain = brain
+        self.dashboard = dashboard
+        
+        self.frame_skip = 4
+        self.is_running = True
+        self.tracker = TelemetryTracker()
+        self.memory_snapshot: bytes = b""
+
+    def execute_loop(self, max_frames: int = 1000000) -> None:
+        cli_logger.info(f"Starting Arkanoid lifecycle in {self.mode.value} mode.")
+        try:
+            for frame_idx in range(max_frames):
+                if not self.is_running:
+                    cli_logger.info("UI closed. Terminating loop gracefully.")
+                    break
+                self._process_single_frame(frame_idx)
+        except KeyboardInterrupt:
+            cli_logger.info("Keyboard interrupt (Ctrl+C) detected. Exiting...")
+        finally:
+            self.emulator.hard_reset()
+
+    def _process_single_frame(self, frame_idx: int) -> None:
+        level_saved = bool(self.memory_snapshot)
+        self.emulator.apply_input(self.tracker.prev_action, self.frame_skip, frame_idx, level_saved)
+        frame_matrix = self.emulator.extract_frame()
+        
+        perception = self.vision.process_game_frame(frame_matrix)
+        self._ensure_level_checkpoint(perception)
+        
+        reward = self._compute_instant_reward(perception)
+        if reward <= -100.0:
+            self._handle_agent_death(reward)
+            return
+
+        self.tracker.record_step(perception, reward, level_saved)
+        next_action = self._determine_next_action(perception, reward)
+        
+        self._render_output_if_needed(frame_idx, frame_matrix, perception, reward)
+        self.tracker.shift_historical_state(perception, next_action)
+
+    def _ensure_level_checkpoint(self, perception: FramePerception) -> None:
+        if self.memory_snapshot:
+            return
+            
+        objects_present = perception.ball is not None and perception.paddle is not None
+        if objects_present:
+            self.memory_snapshot = self.emulator.capture_memory_state()
+            self.tracker.reset_debounce_buffer(perception.block_count)
+            cli_logger.info("Level active. Captured emulator memory state.")
+
+    def _compute_instant_reward(self, perception: FramePerception) -> float:
+        if not self.memory_snapshot:
+            return 0.0
+            
+        self.tracker.update_absence_counter(perception)
+        return self.brain.calculate_reward(
+            perception, 
+            self.tracker.ball_absence_counter,
+            self.tracker.prev_action,
+            self.tracker.prev_prev_action
+        )
+
+    def _handle_agent_death(self, terminal_penalty: float) -> None:
+        if self.tracker.prev_perception is not None and self.mode != ExecutionMode.SHOWCASE:
+            old_state = self.brain.discretizer.discretize(self.tracker.prev_perception)
+            self.brain.apply_terminal_penalty(old_state, self.tracker.prev_action, terminal_penalty)
+            
+        self._log_episode_completion()
+        self._revert_environment_state()
+
     def _determine_next_action(self, perception: FramePerception, reward: float) -> int:
         if perception.paddle is None:
             return 0
@@ -198,11 +233,11 @@ class ArkanoidOrchestrator:
             return self.brain.decide_optimal_action(curr_state)
             
         old_state = None
-        if self.prev_perception is not None:
-            old_state = self.brain.discretizer.discretize(self.prev_perception)
+        if self.tracker.prev_perception is not None:
+            old_state = self.brain.discretizer.discretize(self.tracker.prev_perception)
             
         return self.brain.decide_exploratory_action(
-            curr_state, old_state, self.prev_action, reward
+            curr_state, old_state, self.tracker.prev_action, reward
         )
 
     def _render_output_if_needed(
@@ -219,37 +254,24 @@ class ArkanoidOrchestrator:
             if not keep_running:
                 self.is_running = False
 
-    def _shift_historical_state(self, perception: FramePerception, next_action: int) -> None:
-        self.prev_perception = perception
-        self.prev_prev_action = self.prev_action
-        self.prev_action = next_action
-
     def _log_episode_completion(self) -> None:
-        epsilon = self.brain.decay_exploration_rate(self.stats.steps_survived)
-        
-        self.history.episodes.append(len(self.history.episodes) + 1)
-        self.history.rewards.append(self.stats.accumulated_reward)
-        self.history.survival_frames.append(self.stats.steps_survived)
-        self.history.blocks_destroyed.append(self.stats.blocks_destroyed)
-        self.history.paddle_hits.append(self.stats.paddle_hits)
-        self.history.epsilons.append(epsilon)
-        self.history.jitters.append(self.stats.action_jitters)
-        
-        self.dashboard.tick_episode(self.history)
+        epsilon = self.brain.decay_exploration_rate(self.tracker.stats.steps_survived)
+        stats = self.tracker.finalize_episode(epsilon)
+        self.dashboard.tick_episode(self.tracker.history)
         
         log_payload = {
-            "survived": self.stats.steps_survived,
-            "hits": self.stats.paddle_hits,
-            "blocks": self.stats.blocks_destroyed,
-            "reward": self.stats.accumulated_reward
+            "survived": stats.steps_survived,
+            "hits": stats.paddle_hits,
+            "blocks": stats.blocks_destroyed,
+            "reward": stats.accumulated_reward
         }
         
         debug_logger.debug(json.dumps(log_payload))
         if self.mode == ExecutionMode.TRAIN_HEADLESS:
             cli_logger.info(
-                f"[EPISODE END] Survived: {self.stats.steps_survived:04d} | "
-                f"Hits: {self.stats.paddle_hits:02d} | Eps: {epsilon:.4f} | "
-                f"Rwd: {self.stats.accumulated_reward:06.2f}"
+                f"[EPISODE END] Survived: {stats.steps_survived:04d} | "
+                f"Hits: {stats.paddle_hits:02d} | Eps: {epsilon:.4f} | "
+                f"Rwd: {stats.accumulated_reward:06.2f}"
             )
 
     def _revert_environment_state(self) -> None:
@@ -258,12 +280,7 @@ class ArkanoidOrchestrator:
         else:
             self.emulator.hard_reset()
             
-        self.stats = EpisodeTelemetry()
-        self.prev_perception = None
-        self.prev_action = 0
-        self.prev_prev_action = 0
-        self.ball_absence_counter = 0
-        self.block_buffer.clear()
+        self.tracker.reset_episode()
 
 
 if __name__ == "__main__":
@@ -271,13 +288,19 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mode",
         type=str,
-        default="showcase",
+        default="train_ui",
         choices=[m.value for m in ExecutionMode],
         help="Selects the execution and rendering trajectory."
     )
     
     args = parser.parse_args()
     selected_mode = ExecutionMode(args.mode)
+
+    if selected_mode == ExecutionMode.SHOWCASE and not os.path.exists("arkanoid_brain.pkl"):
+        cli_logger.warning(
+            "WARNING: Running in SHOWCASE mode without a trained model! "
+            "The agent will not explore and will default to holding LEFT."
+        )
 
     try:
         physics_env = PhysicsEnvironment(left_wall=16.0, right_wall=240.0, paddle_y=212.0)

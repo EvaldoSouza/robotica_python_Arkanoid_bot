@@ -34,6 +34,7 @@ class LiveRenderer:
         # 1ms delay allows OpenCV to process GUI events (including the 'X' button)
         key = cv2.waitKey(1) & 0xFF
         if key == 27 or key == ord('q'):
+            print(f"Key pressed: {key}")
             return False # User pressed ESC or 'q'
             
         # NATIVE X-BUTTON DETECTION
@@ -42,9 +43,11 @@ class LiveRenderer:
         # it returns 1.0 as long as the window exists, and -1.0 the moment the 'X' button is clicked.
         try:
             if cv2.getWindowProperty(self.window_name, cv2.WND_PROP_AUTOSIZE) < 0:
+                print("Window is closed")
                 return False
         except cv2.error as e:
             # If the C++ window handle is fully destroyed, getting a property throws an error
+            print(f"Closed with error: {e}")
             return False
             
         return True
@@ -131,19 +134,46 @@ class MetricsRenderer:
         self.fig = plt.figure(figsize=(14, 7))
         self.fig.canvas.manager.set_window_title('RL Training Telemetry')
 
+        # Initialize axes and lines once to prevent memory leaks
+        self.ax1 = self.fig.add_subplot(2, 2, 1)
+        self.line_reward_raw, = self.ax1.plot([], [], color='lightgray', label='Raw')
+        self.line_reward_avg, = self.ax1.plot([], [], color='blue', linewidth=2, label='Avg')
+        self.ax1.set_title('Cumulative Episodic Reward')
+        self.ax1.legend()
+
+        self.ax2 = self.fig.add_subplot(2, 2, 2)
+        self.line_blocks, = self.ax2.plot([], [], color='green', linewidth=2)
+        self.ax2.set_ylabel('Blocks Broken (Avg)', color='green')
+        
+        self.ax2_twin = self.ax2.twinx()
+        self.line_epsilon, = self.ax2_twin.plot([], [], color='red', linestyle='--', linewidth=1)
+        self.ax2_twin.set_ylabel('Exploration Rate (Epsilon)', color='red')
+        self.ax2.set_title('Task Execution vs Exploration')
+
+        self.ax3 = self.fig.add_subplot(2, 2, 3)
+        self.line_jitters, = self.ax3.plot([], [], color='black', linewidth=2)
+        self.ax3.set_title('Agent Jitter Frequency')
+        self.ax3.set_ylabel('Jitters / Step')
+
+        self.ax4 = self.fig.add_subplot(2, 2, 4)
+        self.line_survival_raw, = self.ax4.plot([], [], color='lightgray')
+        self.line_survival_avg, = self.ax4.plot([], [], color='cyan', linewidth=2)
+        self.ax4.set_title('Survival Duration')
+        self.ax4.set_ylabel('Frames Survived')
+        
+        self.fig.tight_layout()
+
     def update_metrics(self, history: TelemetryHistory) -> None:
         if not history.episodes:
             return
             
-        self.fig.clf()
+        self._update_reward(history)
+        self._update_task_performance(history)
+        self._update_smoothness(history)
+        self._update_survival(history)
         
-        self._plot_reward(history)
-        self._plot_task_performance(history)
-        self._plot_smoothness(history)
-        self._plot_survival(history)
-        
-        self.fig.tight_layout()
-        plt.pause(0.001) # Flush GUI events without stalling
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events() 
 
     def _smooth_series(self, data: List[float]) -> List[float]:
         if not data:
@@ -157,35 +187,30 @@ class MetricsRenderer:
             
         return smoothed
 
-    def _plot_reward(self, h: TelemetryHistory) -> None:
-        ax = self.fig.add_subplot(2, 2, 1)
-        ax.plot(h.episodes, h.rewards, color='lightgray', label='Raw')
-        ax.plot(h.episodes, self._smooth_series(h.rewards), color='blue', linewidth=2, label='Avg')
-        ax.set_title('Cumulative Episodic Reward')
-        ax.legend()
+    def _update_reward(self, h: TelemetryHistory) -> None:
+        self.line_reward_raw.set_data(h.episodes, h.rewards)
+        self.line_reward_avg.set_data(h.episodes, self._smooth_series(h.rewards))
+        self.ax1.relim()
+        self.ax1.autoscale_view()
 
-    def _plot_task_performance(self, h: TelemetryHistory) -> None:
-        ax1 = self.fig.add_subplot(2, 2, 2)
-        ax1.plot(h.episodes, self._smooth_series(h.blocks_destroyed), color='green', linewidth=2)
-        ax1.set_ylabel('Blocks Broken (Avg)', color='green')
-        
-        ax2 = ax1.twinx()
-        ax2.plot(h.episodes, h.epsilons, color='red', linestyle='--', linewidth=1)
-        ax2.set_ylabel('Exploration Rate (Epsilon)', color='red')
-        ax1.set_title('Task Execution vs Exploration')
+    def _update_task_performance(self, h: TelemetryHistory) -> None:
+        self.line_blocks.set_data(h.episodes, self._smooth_series(h.blocks_destroyed))
+        self.line_epsilon.set_data(h.episodes, h.epsilons)
+        self.ax2.relim()
+        self.ax2.autoscale_view()
+        self.ax2_twin.relim()
+        self.ax2_twin.autoscale_view()
 
-    def _plot_smoothness(self, h: TelemetryHistory) -> None:
-        ax = self.fig.add_subplot(2, 2, 3)
-        ax.plot(h.episodes, self._smooth_series(h.jitters), color='black', linewidth=2)
-        ax.set_title('Agent Jitter Frequency')
-        ax.set_ylabel('Jitters / Step')
+    def _update_smoothness(self, h: TelemetryHistory) -> None:
+        self.line_jitters.set_data(h.episodes, self._smooth_series(h.jitters))
+        self.ax3.relim()
+        self.ax3.autoscale_view()
 
-    def _plot_survival(self, h: TelemetryHistory) -> None:
-        ax = self.fig.add_subplot(2, 2, 4)
-        ax.plot(h.episodes, h.survival_frames, color='lightgray')
-        ax.plot(h.episodes, self._smooth_series(h.survival_frames), color='cyan', linewidth=2)
-        ax.set_title('Survival Duration')
-        ax.set_ylabel('Frames Survived')
+    def _update_survival(self, h: TelemetryHistory) -> None:
+        self.line_survival_raw.set_data(h.episodes, h.survival_frames)
+        self.line_survival_avg.set_data(h.episodes, self._smooth_series(h.survival_frames))
+        self.ax4.relim()
+        self.ax4.autoscale_view()
 
 
 class DashboardManager:
