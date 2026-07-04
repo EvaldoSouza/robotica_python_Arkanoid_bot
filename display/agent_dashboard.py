@@ -142,13 +142,11 @@ class MetricsRenderer:
         self.ax1.legend()
 
         self.ax2 = self.fig.add_subplot(2, 2, 2)
-        self.line_blocks, = self.ax2.plot([], [], color='green', linewidth=2)
-        self.ax2.set_ylabel('Blocks Broken (Avg)', color='green')
-        
-        self.ax2_twin = self.ax2.twinx()
-        self.line_epsilon, = self.ax2_twin.plot([], [], color='red', linestyle='--', linewidth=1)
-        self.ax2_twin.set_ylabel('Exploration Rate (Epsilon)', color='red')
-        self.ax2.set_title('Task Execution vs Exploration')
+        self.line_q_raw, = self.ax2.plot([], [], color='lightgray', label='Raw')
+        self.line_q_avg, = self.ax2.plot([], [], color='purple', linewidth=2, label='Avg')
+        self.ax2.set_ylabel('Avg Max Q-Value', color='purple')
+        self.ax2.set_title('Agent Confidence (Expected Future Reward)')
+        self.ax2.legend()
 
         self.ax3 = self.fig.add_subplot(2, 2, 3)
         self.line_jitters, = self.ax3.plot([], [], color='black', linewidth=2)
@@ -168,7 +166,7 @@ class MetricsRenderer:
             return
             
         self._update_reward(history)
-        self._update_task_performance(history)
+        self._update_learning_metrics(history)
         self._update_smoothness(history)
         self._update_survival(history)
         
@@ -193,15 +191,11 @@ class MetricsRenderer:
         self.ax1.relim()
         self.ax1.autoscale_view()
 
-    def _update_task_performance(self, h: TelemetryHistory) -> None:
-        self.line_blocks.set_data(h.episodes, self._smooth_series(h.blocks_destroyed))
-        self.line_epsilon.set_data(h.episodes, h.epsilons)
-        
+    def _update_learning_metrics(self, h: TelemetryHistory) -> None:
+        self.line_q_raw.set_data(h.episodes, h.avg_max_q)
+        self.line_q_avg.set_data(h.episodes, self._smooth_series(h.avg_max_q))
         self.ax2.relim()
-        self.ax2.autoscale_view(scalex=True, scaley=True)
-        
-        self.ax2_twin.relim()
-        self.ax2_twin.autoscale_view(scalex=False, scaley=True)
+        self.ax2.autoscale_view()
 
     def _update_smoothness(self, h: TelemetryHistory) -> None:
         self.line_jitters.set_data(h.episodes, self._smooth_series(h.jitters))

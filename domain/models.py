@@ -27,3 +27,4 @@ class TelemetryHistory:
     paddle_hits: List[int]
     epsilons: List[float]
     jitters: List[int]
+    avg_max_q: List[float] # Tracks internal agent confidence over time

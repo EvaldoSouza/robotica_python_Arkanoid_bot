@@ -44,6 +44,7 @@ class EpisodeTelemetry:
     paddle_hits: int = 0
     blocks_destroyed: int = 0
     action_jitters: int = 0
+    cumulative_max_q: float = 0.0
 
 
 class TelemetryTracker:
@@ -53,7 +54,7 @@ class TelemetryTracker:
     """
     def __init__(self) -> None:
         self.stats = EpisodeTelemetry()
-        self.history = TelemetryHistory([], [], [], [], [], [], [])
+        self.history = TelemetryHistory([], [], [], [], [], [], [], [])
         self.ball_absence_counter = 0
         self.prev_action = 0
         self.prev_prev_action = 0
@@ -95,6 +96,12 @@ class TelemetryTracker:
         self.history.paddle_hits.append(self.stats.paddle_hits)
         self.history.epsilons.append(epsilon)
         self.history.jitters.append(self.stats.action_jitters)
+        
+        avg_q = 0.0
+        if self.stats.steps_survived > 0:
+            avg_q = self.stats.cumulative_max_q / self.stats.steps_survived
+        self.history.avg_max_q.append(avg_q)
+        
         return self.stats
         
     def shift_historical_state(self, perception: FramePerception, next_action: int) -> None:
@@ -229,6 +236,10 @@ class ArkanoidOrchestrator:
             return 0
             
         curr_state = self.brain.discretizer.discretize(perception)
+        
+        # Track the agent's confidence for the dashboard
+        max_q = float(np.max(self.brain.policy.q_table[curr_state]))
+        self.tracker.stats.cumulative_max_q += max_q
             
         if self.mode == ExecutionMode.SHOWCASE:
             return self.brain.decide_optimal_action(curr_state)
