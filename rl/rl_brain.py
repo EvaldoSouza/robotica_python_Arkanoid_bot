@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 from domain.models import Coordinate, FramePerception
 
+StateVector = Tuple[int, int, int, int]
+
 @dataclass(frozen=True)
 class RlConfig:
     alpha: float = 0.2
@@ -135,7 +137,6 @@ class RewardShaper:
         return reward
 
 
-
 class BrainStorage:
     """Manages disk persistence for the Q-Table and training checkpoints."""
     
@@ -143,32 +144,33 @@ class BrainStorage:
         self.filename = filename
         self.best_filename = "arkanoid_best_brain.pkl"
 
-    def load_brain(self, expected_shape: Tuple[int, ...]) -> Tuple[np.ndarray, float]:
+    def load_brain(self, expected_shape: Tuple[int, ...]) -> Tuple[np.ndarray, float, int]:
         if not os.path.exists(self.filename):
-            return np.zeros(expected_shape), 1.0
+            return np.zeros(expected_shape), 1.0, 0
             
         with open(self.filename, "rb") as f:
             data = pickle.load(f)
             
         q_table = data.get("q_table", np.zeros(expected_shape))
         epsilon = data.get("epsilon", 1.0)
+        best_survival = data.get("best_survival", 0)
         
         if q_table.shape != expected_shape:
             raise ValueError(
                 f"Brain mismatch. Expected {expected_shape}, got {q_table.shape}"
             )
             
-        return q_table, epsilon
+        return q_table, epsilon, best_survival
 
-    def save_brain(self, q_table: np.ndarray, epsilon: float) -> None:
-        self._write_to_disk(self.filename, q_table, epsilon)
+    def save_brain(self, q_table: np.ndarray, epsilon: float, best_survival: int) -> None:
+        self._write_to_disk(self.filename, q_table, epsilon, best_survival)
 
-    def save_champion(self, q_table: np.ndarray, epsilon: float) -> None:
-        self._write_to_disk(self.best_filename, q_table, epsilon)
+    def save_champion(self, q_table: np.ndarray, epsilon: float, best_survival: int) -> None:
+        self._write_to_disk(self.best_filename, q_table, epsilon, best_survival)
 
-    def _write_to_disk(self, filepath: str, q_table: np.ndarray, epsilon: float) -> None:
+    def _write_to_disk(self, filepath: str, q_table: np.ndarray, epsilon: float, best_survival: int) -> None:
         with open(filepath, "wb") as f:
-            pickle.dump({"q_table": q_table, "epsilon": epsilon}, f)
+            pickle.dump({"q_table": q_table, "epsilon": epsilon, "best_survival": best_survival}, f)
 
 
 
@@ -179,11 +181,11 @@ class TDLambdaPolicy:
     def __init__(self, config: RlConfig, storage: BrainStorage) -> None:
         self.config = config
         self.storage = storage
-        self.q_table, self.epsilon = storage.load_brain(config.q_dims)
+        self.q_table, self.epsilon, self.best_survival_from_disk = storage.load_brain(config.q_dims)
         self.e_table = np.zeros(config.q_dims)
 
     def step_learning(
-        self, curr_state: Tuple, reward: float, prev_state: Tuple, prev_action: int
+        self, curr_state: StateVector, reward: float, prev_state: StateVector, prev_action: int
     ) -> None:
         # Actions from the orchestrator are 1, 2, 3. Array indices must be 0, 1, 2.
         arr_action = prev_action - 1 
@@ -197,7 +199,7 @@ class TDLambdaPolicy:
         self.q_table += self.config.alpha * delta * self.e_table
         self.e_table *= (self.config.gamma * self.config.lambda_trace)
 
-    def select_action(self, state: Tuple) -> Tuple[int, bool]:
+    def select_action(self, state: StateVector) -> Tuple[int, bool]:
         if random.random() < self.epsilon:
             return random.randint(0, 2), True
             
@@ -224,21 +226,18 @@ class ArkanoidBrain:
         self.shaper = RewardShaper(self.config)
         self.policy = TDLambdaPolicy(self.config, self.storage)
         
-        self.best_survival = 0
+        self.best_survival = self.policy.best_survival_from_disk
         self.prev_velocity: Optional[Coordinate] = None
 
-    def calculate_reward(self, perception: FramePerception, missing_frames: int) -> float:
+    def calculate_reward(self, perception: FramePerception, missing_frames: int, prev_action: int, prev_prev_action: int) -> float:
         if missing_frames >= 15:
             return -100.0
             
-        # In this refactored architecture, prev_action is no longer strictly needed
-        # inside the instant reward calculation as it is applied inside step_learning,
-        # but kept to satisfy interface backwards compatibility during porting.
-        reward = self.shaper.calculate(perception, 0, 0, self.prev_velocity)
+        reward = self.shaper.calculate(perception, prev_action, prev_prev_action, self.prev_velocity)
         self.prev_velocity = perception.velocity
         return reward
 
-    def decide_optimal_action(self, state_tuple: Tuple) -> int:
+    def decide_optimal_action(self, state_tuple: StateVector) -> int:
         action_arr_idx = int(np.argmax(self.policy.q_table[state_tuple]))
         return action_arr_idx + 1 # Convert array index 0-2 back to orchestrator action 1-3
 
@@ -269,7 +268,7 @@ class ArkanoidBrain:
     def decay_exploration_rate(self, current_survival_frames: int = 0) -> float:
         if current_survival_frames > self.best_survival and current_survival_frames > 100:
             self.best_survival = current_survival_frames
-            self.storage.save_champion(self.policy.q_table, self.policy.epsilon)
+            self.storage.save_champion(self.policy.q_table, self.policy.epsilon, self.best_survival)
             
-        self.storage.save_brain(self.policy.q_table, self.policy.epsilon)
+        self.storage.save_brain(self.policy.q_table, self.policy.epsilon, self.best_survival)
         return self.policy.decay_exploration()

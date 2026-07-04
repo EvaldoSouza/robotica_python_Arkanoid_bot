@@ -132,7 +132,9 @@ class ArkanoidOrchestrator:
         else:
             self.ball_absence_counter = 0
             
-        return self.brain.calculate_reward(perception, self.ball_absence_counter)
+        return self.brain.calculate_reward(
+            perception, self.ball_absence_counter, self.prev_action, self.prev_prev_action
+        )
 
     def _handle_agent_death(self, terminal_penalty: float) -> None:
         if self.prev_perception is not None and self.mode != ExecutionMode.SHOWCASE:
