@@ -2,8 +2,9 @@ import sys
 import argparse
 import logging
 import json
+import os
 from enum import Enum
-from typing import Optional, Any
+from typing import Optional
 from dataclasses import dataclass
 
 import numpy as np
@@ -13,7 +14,7 @@ from emulator.nes_environment import NesEnvironment
 from vision.vision_pipeline import VisionPipeline, VisionConfig, PhysicsEnvironment
 from rl.rl_brain import ArkanoidBrain
 from display.agent_dashboard import DashboardManager
-from domain.models import FramePerception, Coordinate, TelemetryHistory
+from domain.models import FramePerception, TelemetryHistory
 
 # Configure user-facing CLI output (Plain Text)
 cli_logger = logging.getLogger("arkanoid_cli")
@@ -43,6 +44,7 @@ class EpisodeTelemetry:
     paddle_hits: int = 0
     blocks_destroyed: int = 0
     action_jitters: int = 0
+
 
 class TelemetryTracker:
     """
@@ -161,14 +163,13 @@ class ArkanoidOrchestrator:
         self.tracker = TelemetryTracker()
         self.memory_snapshot: bytes = b""
 
-    def execute_loop(self, max_frames: int = 1000000) -> None:
+    def execute_loop(self) -> None:
         cli_logger.info(f"Starting Arkanoid lifecycle in {self.mode.value} mode.")
+        frame_idx = 0
         try:
-            for frame_idx in range(max_frames):
-                if not self.is_running:
-                    cli_logger.info("UI closed. Terminating loop gracefully.")
-                    break
+            while self.is_running:
                 self._process_single_frame(frame_idx)
+                frame_idx += 1
         except KeyboardInterrupt:
             cli_logger.info("Keyboard interrupt (Ctrl+C) detected. Exiting...")
         finally:
@@ -253,6 +254,7 @@ class ArkanoidOrchestrator:
             keep_running = self.dashboard.tick_realtime(frame, perception, q_vals)
             if not keep_running:
                 self.is_running = False
+                cli_logger.info("UI closed. Terminating loop gracefully.")
 
     def _log_episode_completion(self) -> None:
         epsilon = self.brain.decay_exploration_rate(self.tracker.stats.steps_survived)
@@ -313,7 +315,9 @@ if __name__ == "__main__":
             brain=ArkanoidBrain(),
             dashboard=DashboardManager(headless=(selected_mode == ExecutionMode.TRAIN_HEADLESS))
         )
-        director.execute_loop(max_frames=1000000)
+        
+        # Now safely runs until closed or interrupted!
+        director.execute_loop() 
         
     except Exception as exc:
         if not hasattr(exc, 'args') or len(exc.args) == 0:
