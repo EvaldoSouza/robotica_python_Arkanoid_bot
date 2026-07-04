@@ -12,7 +12,7 @@ import numpy as np
 # Domain Imports
 from emulator.nes_environment import NesEnvironment
 from vision.vision_pipeline import VisionPipeline, VisionConfig, PhysicsEnvironment
-from rl.rl_brain import ArkanoidBrain
+from rl.rl_brain import ArkanoidBrain, RlConfig, BrainArchive
 from display.agent_dashboard import DashboardManager
 from domain.models import FramePerception, TelemetryHistory
 
@@ -257,7 +257,10 @@ class ArkanoidOrchestrator:
                 cli_logger.info("UI closed. Terminating loop gracefully.")
 
     def _log_episode_completion(self) -> None:
-        epsilon = self.brain.decay_exploration_rate(self.tracker.stats.steps_survived)
+        epsilon = self.brain.decay_exploration_rate(
+            self.tracker.stats.steps_survived,
+            self.tracker.stats.paddle_hits
+        )
         stats = self.tracker.finalize_episode(epsilon)
         self.dashboard.tick_episode(self.tracker.history)
         
@@ -290,7 +293,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mode",
         type=str,
-        default="train_ui",
+        default="showcase",
         choices=[m.value for m in ExecutionMode],
         help="Selects the execution and rendering trajectory."
     )
@@ -308,11 +311,14 @@ if __name__ == "__main__":
         physics_env = PhysicsEnvironment(left_wall=16.0, right_wall=240.0, paddle_y=212.0)
         vision_config = VisionConfig(ball_threshold=204, paddle_threshold=127, physics=physics_env)
         
+        rl_config = RlConfig()
+        brain_archive = BrainArchive()
+        
         director = ArkanoidOrchestrator(
             mode=selected_mode,
             emulator=NesEnvironment("roms/arkanoid.nes"),
             vision=VisionPipeline(vision_config),
-            brain=ArkanoidBrain(),
+            brain=ArkanoidBrain(config=rl_config, archive=brain_archive),
             dashboard=DashboardManager(headless=(selected_mode == ExecutionMode.TRAIN_HEADLESS))
         )
         

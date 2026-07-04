@@ -196,10 +196,12 @@ class MetricsRenderer:
     def _update_task_performance(self, h: TelemetryHistory) -> None:
         self.line_blocks.set_data(h.episodes, self._smooth_series(h.blocks_destroyed))
         self.line_epsilon.set_data(h.episodes, h.epsilons)
+        
         self.ax2.relim()
-        self.ax2.autoscale_view()
+        self.ax2.autoscale_view(scalex=True, scaley=True)
+        
         self.ax2_twin.relim()
-        self.ax2_twin.autoscale_view()
+        self.ax2_twin.autoscale_view(scalex=False, scaley=True)
 
     def _update_smoothness(self, h: TelemetryHistory) -> None:
         self.line_jitters.set_data(h.episodes, self._smooth_series(h.jitters))
