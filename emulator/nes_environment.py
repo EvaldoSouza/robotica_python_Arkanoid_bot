@@ -35,7 +35,8 @@ class NesEnvironment:
         try:
             # nes-py wraps the C++ emulator which exposes these protected methods
             if hasattr(self._env.unwrapped, '_backup'):
-                return self._env.unwrapped._backup()
+                self._env.unwrapped._backup()
+                return b"saved_internally"
             if hasattr(self._env, 'get_state'):
                 return self._env.get_state()
         except Exception:
@@ -48,7 +49,7 @@ class NesEnvironment:
             
         try:
             if hasattr(self._env.unwrapped, '_restore'):
-                self._env.unwrapped._restore(state)
+                self._env.unwrapped._restore()
             elif hasattr(self._env, 'set_state'):
                 self._env.set_state(state)
         except Exception:
