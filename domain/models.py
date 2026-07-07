@@ -28,3 +28,5 @@ class TelemetryHistory:
     epsilons: List[float]
     jitters: List[int]
     avg_max_q: List[float]
+    alpha: float = 0.0
+    gamma: float = 0.0

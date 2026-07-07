@@ -12,7 +12,7 @@ import numpy as np
 from emulator.nes_environment import NesEnvironment
 from vision.vision_pipeline import VisionPipeline, VisionConfig, PhysicsEnvironment
 from rl.rl_brain import ArkanoidBrain, RlConfig, BrainArchive
-from rl.storage_gateway import LocalDiskStorage
+from rl.storage_gateway import LocalDiskStorage, StorageGateway
 from display.telemetry_dashboard import TelemetryDashboard
 from domain.models import FramePerception, TelemetryHistory
 
@@ -46,14 +46,29 @@ class EpisodeTelemetry:
 
 
 class TelemetryTracker:
-    def __init__(self) -> None:
+    def __init__(self, storage: StorageGateway, rl_config: RlConfig) -> None:
+        self.storage = storage
+        self.rl_config = rl_config
+        self.state_file = "telemetry_history.pkl"
+        self.raw_data_file = "telemetry_raw.json"
         self.stats = EpisodeTelemetry()
-        self.history = TelemetryHistory([], [], [], [], [], [], [], [])
+        self.history = self._load_persisted_history()
         self.ball_absence_counter = 0
         self.prev_action = 0
         self.prev_prev_action = 0
         self.prev_perception: Optional[FramePerception] = None
         self.block_buffer: list[int] = []
+
+    def _load_persisted_history(self) -> TelemetryHistory:
+        if self.storage.exists(self.state_file):
+            payload = self.storage.read_pickle(self.state_file)
+            if payload:
+                return TelemetryHistory(**payload)
+                
+        return TelemetryHistory(
+            [], [], [], [], [], [], [], [], 
+            self.rl_config.alpha, self.rl_config.gamma
+        )
 
     def reset_episode(self) -> None:
         self.stats = EpisodeTelemetry()
@@ -96,7 +111,12 @@ class TelemetryTracker:
             avg_q = self.stats.cumulative_max_q / self.stats.steps_survived
         self.history.avg_max_q.append(avg_q)
         
+        self._persist_telemetry()
         return self.stats
+
+    def _persist_telemetry(self) -> None:
+        self.storage.write_pickle(self.state_file, self.history.__dict__)
+        self.storage.write_json(self.raw_data_file, self.history.__dict__)
         
     def shift_historical_state(self, perception: FramePerception, next_action: int) -> None:
         self.prev_perception = perception
@@ -147,6 +167,7 @@ class ArkanoidOrchestrator:
         vision: VisionPipeline,
         brain: ArkanoidBrain,
         dashboard: TelemetryDashboard,
+        tracker: TelemetryTracker,
     ) -> None:
         self.mode = mode
         self.emulator = emulator
@@ -156,7 +177,7 @@ class ArkanoidOrchestrator:
         
         self.frame_skip = 4
         self.is_running = True
-        self.tracker = TelemetryTracker()
+        self.tracker = tracker
         self.memory_snapshot: bytes = b""
 
     def execute_loop(self) -> None:
@@ -312,13 +333,15 @@ if __name__ == "__main__":
         rl_config = RlConfig()
         disk_gateway = LocalDiskStorage()
         brain_archive = BrainArchive(storage=disk_gateway)
+        telemetry_tracker = TelemetryTracker(storage=disk_gateway, rl_config=rl_config)
         
         director = ArkanoidOrchestrator(
             mode=selected_mode,
             emulator=NesEnvironment("roms/arkanoid.nes"),
             vision=VisionPipeline(vision_config),
             brain=ArkanoidBrain(config=rl_config, archive=brain_archive),
-            dashboard=TelemetryDashboard(headless=(selected_mode == ExecutionMode.TRAIN_HEADLESS))
+            dashboard=TelemetryDashboard(headless=(selected_mode == ExecutionMode.TRAIN_HEADLESS)),
+            tracker=telemetry_tracker
         )
         
         director.execute_loop() 
