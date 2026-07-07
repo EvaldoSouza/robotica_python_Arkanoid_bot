@@ -11,7 +11,7 @@ StateVector = Tuple[int]
 
 @dataclass(frozen=True)
 class RlConfig:
-    alpha: float = 0.2
+    alpha: float = 0.1
     gamma: float = 0.95
     epsilon_start: float = 1.0
     epsilon_min: float = 0.05
