@@ -334,12 +334,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     selected_mode = ExecutionMode(args.mode)
 
-    if selected_mode == ExecutionMode.SHOWCASE and not os.path.exists("arkanoid_brain.pkl"):
-        cli_logger.warning(
-            "WARNING: Running in SHOWCASE mode without a trained model! "
-            "The agent will not explore and will default to holding LEFT."
-        )
-
     try:
         physics_env = PhysicsEnvironment(left_wall=16.0, right_wall=240.0, paddle_y=212.0)
         vision_config = VisionConfig(ball_threshold=204, paddle_threshold=127, physics=physics_env)
@@ -349,11 +343,21 @@ if __name__ == "__main__":
         brain_archive = BrainArchive(storage=disk_gateway)
         telemetry_tracker = TelemetryTracker(storage=disk_gateway, rl_config=rl_config)
         
+        if selected_mode == ExecutionMode.SHOWCASE and not disk_gateway.exists(brain_archive.best_filename):
+            cli_logger.warning(
+                "WARNING: Running in SHOWCASE mode without a trained champion model! "
+                "The agent will not explore and will default to holding LEFT."
+            )
+            
         director = ArkanoidOrchestrator(
             mode=selected_mode,
             emulator=NesEnvironment("roms/arkanoid.nes"),
             vision=VisionPipeline(vision_config),
-            brain=ArkanoidBrain(config=rl_config, archive=brain_archive),
+            brain=ArkanoidBrain(
+                config=rl_config, 
+                archive=brain_archive,
+                use_champion=(selected_mode == ExecutionMode.SHOWCASE)
+            ),
             dashboard=TelemetryDashboard(headless=(selected_mode == ExecutionMode.TRAIN_HEADLESS)),
             tracker=telemetry_tracker
         )

@@ -90,12 +90,11 @@ class BrainArchive:
             
         return self._extract_payload(self.filename, expected_shape)
 
-    def load_champion(self, expected_shape: Tuple[int, ...]) -> np.ndarray:
+    def load_champion(self, expected_shape: Tuple[int, ...]) -> Tuple[np.ndarray, float, int]:
         if not self.storage.exists(self.best_filename):
-            return np.zeros(expected_shape)
+            return np.zeros(expected_shape), 1.0, 0
             
-        q_table, _, _ = self._extract_payload(self.best_filename, expected_shape)
-        return q_table
+        return self._extract_payload(self.best_filename, expected_shape)
 
     def save_brain(self, q_table: np.ndarray, epsilon: float, best_survival: int) -> None:
         self._commit_to_storage(self.filename, q_table, epsilon, best_survival)
@@ -132,10 +131,15 @@ class BrainArchive:
 
 
 class QLearningPolicy:
-    def __init__(self, config: RlConfig, archive: BrainArchive) -> None:
+    def __init__(self, config: RlConfig, archive: BrainArchive, use_champion: bool = False) -> None:
         self.config = config
         self.archive = archive
-        self.q_table, self.epsilon, self.best_survival = archive.load_brain(config.q_dims)
+        
+        if use_champion:
+            self.q_table, self.epsilon, self.best_survival = archive.load_champion(config.q_dims)
+            self.epsilon = 0.0  # Force strictly greedy exploitation in showcase mode
+        else:
+            self.q_table, self.epsilon, self.best_survival = archive.load_brain(config.q_dims)
 
     def step_learning(
         self, curr_state: StateVector, reward: float, prev_state: StateVector, prev_action: int
@@ -170,12 +174,12 @@ class QLearningPolicy:
 
 
 class ArkanoidBrain:
-    def __init__(self, config: RlConfig, archive: BrainArchive) -> None:
+    def __init__(self, config: RlConfig, archive: BrainArchive, use_champion: bool = False) -> None:
         self.config = config
         self.archive = archive
         self.discretizer = StateDiscretizer()
         self.shaper = RewardShaper(config)
-        self.policy = QLearningPolicy(config, archive)
+        self.policy = QLearningPolicy(config, archive, use_champion)
         self.prev_velocity: Optional[Coordinate] = None
 
     def calculate_reward(
