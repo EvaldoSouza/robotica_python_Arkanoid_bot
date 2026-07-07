@@ -4,8 +4,7 @@ from emulator.emulator_translator import translate_rl_action
 
 class NesEnvironment:
     """
-    Adapter for the NES emulator to match the orchestrator's expectations.
-    Isolates third-party nes-py dependencies from the core domain logic.
+    Adapter for the NES emulator to isolate third-party dependencies.
     """
     
     def __init__(self, rom_path: str) -> None:
@@ -27,13 +26,13 @@ class NesEnvironment:
     def extract_frame(self) -> np.ndarray:
         if self._last_frame is None:
             raise RuntimeError(
-                f"No frame available. Expected numpy array, got {type(self._last_frame)}."
+                f"No frame available. Offending value: {type(self._last_frame)}. "
+                "Expected shape: 2D/3D numpy ndarray."
             )
         return self._last_frame
         
     def capture_memory_state(self) -> bytes:
         try:
-            # nes-py wraps the C++ emulator which exposes these protected methods
             if hasattr(self._env.unwrapped, '_backup'):
                 self._env.unwrapped._backup()
                 return b"saved_internally"

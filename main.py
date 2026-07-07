@@ -9,26 +9,24 @@ from dataclasses import dataclass
 
 import numpy as np
 
-# Domain Imports
 from emulator.nes_environment import NesEnvironment
 from vision.vision_pipeline import VisionPipeline, VisionConfig, PhysicsEnvironment
 from rl.rl_brain import ArkanoidBrain, RlConfig, BrainArchive
-from display.agent_dashboard import DashboardManager
+from rl.storage_gateway import LocalDiskStorage
+from display.telemetry_dashboard import TelemetryDashboard
 from domain.models import FramePerception, TelemetryHistory
 
-# Configure user-facing CLI output (Plain Text)
 cli_logger = logging.getLogger("arkanoid_cli")
 cli_logger.setLevel(logging.INFO)
-cli_handler = logging.StreamHandler(sys.stdout)
-cli_handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
-cli_logger.addHandler(cli_handler)
+cli_stream_emitter = logging.StreamHandler(sys.stdout)
+cli_stream_emitter.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+cli_logger.addHandler(cli_stream_emitter)
 
-# Configure debugging/observability output (Structured JSON)
 debug_logger = logging.getLogger("arkanoid_debug")
 debug_logger.setLevel(logging.DEBUG)
-debug_handler = logging.FileHandler("arkanoid_debug.log")
-debug_handler.setFormatter(logging.Formatter("%(message)s"))
-debug_logger.addHandler(debug_handler)
+debug_file_emitter = logging.FileHandler("arkanoid_debug.log")
+debug_file_emitter.setFormatter(logging.Formatter("%(message)s"))
+debug_logger.addHandler(debug_file_emitter)
 
 
 class ExecutionMode(Enum):
@@ -48,10 +46,6 @@ class EpisodeTelemetry:
 
 
 class TelemetryTracker:
-    """
-    Encapsulates all domain rules for tracking game state, scoring,
-    and detecting specific agent behaviors like jitter or paddle hits.
-    """
     def __init__(self) -> None:
         self.stats = EpisodeTelemetry()
         self.history = TelemetryHistory([], [], [], [], [], [], [], [])
@@ -146,18 +140,13 @@ class TelemetryTracker:
 
 
 class ArkanoidOrchestrator:
-    """
-    Manages the lifecycle, timing, and integration of the Arkanoid agent.
-    Delegates all heavy lifting to the injected domain modules.
-    """
-
     def __init__(
         self,
         mode: ExecutionMode,
         emulator: NesEnvironment,
         vision: VisionPipeline,
         brain: ArkanoidBrain,
-        dashboard: DashboardManager,
+        dashboard: TelemetryDashboard,
     ) -> None:
         self.mode = mode
         self.emulator = emulator
@@ -236,8 +225,6 @@ class ArkanoidOrchestrator:
             return 0
             
         curr_state = self.brain.discretizer.discretize(perception)
-        
-        # Track the agent's confidence for the dashboard
         max_q = float(np.max(self.brain.policy.q_table[curr_state]))
         self.tracker.stats.cumulative_max_q += max_q
             
@@ -323,25 +310,23 @@ if __name__ == "__main__":
         vision_config = VisionConfig(ball_threshold=204, paddle_threshold=127, physics=physics_env)
         
         rl_config = RlConfig()
-        brain_archive = BrainArchive()
+        disk_gateway = LocalDiskStorage()
+        brain_archive = BrainArchive(storage=disk_gateway)
         
         director = ArkanoidOrchestrator(
             mode=selected_mode,
             emulator=NesEnvironment("roms/arkanoid.nes"),
             vision=VisionPipeline(vision_config),
             brain=ArkanoidBrain(config=rl_config, archive=brain_archive),
-            dashboard=DashboardManager(headless=(selected_mode == ExecutionMode.TRAIN_HEADLESS))
+            dashboard=TelemetryDashboard(headless=(selected_mode == ExecutionMode.TRAIN_HEADLESS))
         )
         
-        # Now safely runs until closed or interrupted!
         director.execute_loop() 
         
     except Exception as exc:
-        if not hasattr(exc, 'args') or len(exc.args) == 0:
-            raise
         offending_val = exc.args[0] if exc.args else "Unknown"
         cli_logger.error(
             f"Fatal error during execution. Offending value: {offending_val}. "
-            "Expected valid state progression."
+            "Expected shape: Valid internal domain execution state progression."
         )
         sys.exit(1)

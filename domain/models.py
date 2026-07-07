@@ -15,7 +15,7 @@ class FramePerception:
     velocity: Optional[Coordinate]
     intercept_x: float
     block_count: int
-    block_density: int = 1 # Added default to bridge Vision and RL mismatch
+    block_density: int = 1
 
 @dataclass
 class TelemetryHistory:
@@ -27,4 +27,4 @@ class TelemetryHistory:
     paddle_hits: List[int]
     epsilons: List[float]
     jitters: List[int]
-    avg_max_q: List[float] # Tracks internal agent confidence over time
+    avg_max_q: List[float]
