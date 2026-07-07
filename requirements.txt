@@ -10,7 +10,7 @@ kiwisolver==1.5.0
 matplotlib==3.11.0
 nes_py==8.2.1
 numpy==1.26.4
-opencv-python==5.0.0.93
+opencv-python==4.11.0.86
 packaging==26.2
 pillow==12.3.0
 pyglet==1.5.21
