@@ -3,6 +3,8 @@ import argparse
 import logging
 import json
 import os
+import traceback
+from datetime import datetime
 from enum import Enum
 from typing import Optional
 from dataclasses import dataclass
@@ -46,11 +48,12 @@ class EpisodeTelemetry:
 
 
 class TelemetryTracker:
-    def __init__(self, storage: StorageGateway, rl_config: RlConfig) -> None:
+    def __init__(self, storage: StorageGateway, rl_config: RlConfig, session_dir: str = "") -> None:
         self.storage = storage
         self.rl_config = rl_config
-        self.state_file = "telemetry_history.pkl"
-        self.raw_data_file = "telemetry_raw.json"
+        self.state_file = os.path.join(session_dir, "telemetry_history.pkl") if session_dir else "telemetry_history.pkl"
+        self.raw_data_file = os.path.join(session_dir, "telemetry_raw.json") if session_dir else "telemetry_raw.json"
+        
         self.stats = EpisodeTelemetry()
         self.history = self._load_persisted_history()
         self.ball_absence_counter = 0
@@ -311,6 +314,8 @@ class ArkanoidOrchestrator:
                 f"Hits: {stats.paddle_hits:02d} | Eps: {epsilon:.4f} | "
                 f"Rwd: {stats.accumulated_reward:06.2f}"
             )
+            
+        self._revert_environment_state()
 
     def _revert_environment_state(self) -> None:
         if self.memory_snapshot:
@@ -330,9 +335,25 @@ if __name__ == "__main__":
         choices=[m.value for m in ExecutionMode],
         help="Selects the execution and rendering trajectory."
     )
+    parser.add_argument(
+        "--session",
+        type=str,
+        default=None,
+        help="Path to a specific session directory for saving/loading agent states."
+    )
     
     args = parser.parse_args()
     selected_mode = ExecutionMode(args.mode)
+
+    # Resolve Session Directory
+    session_dir = args.session
+    if not session_dir and selected_mode in (ExecutionMode.TRAIN_UI, ExecutionMode.TRAIN_HEADLESS):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_dir = os.path.join("sessions", f"run_{timestamp}")
+        
+    if session_dir:
+        os.makedirs(session_dir, exist_ok=True)
+        cli_logger.info(f"Active session directory: {session_dir}")
 
     try:
         physics_env = PhysicsEnvironment(left_wall=16.0, right_wall=240.0, paddle_y=212.0)
@@ -340,12 +361,15 @@ if __name__ == "__main__":
         
         rl_config = RlConfig()
         disk_gateway = LocalDiskStorage()
-        brain_archive = BrainArchive(storage=disk_gateway)
-        telemetry_tracker = TelemetryTracker(storage=disk_gateway, rl_config=rl_config)
+        
+        # Inject the resolved directory downward
+        brain_archive = BrainArchive(storage=disk_gateway, session_dir=session_dir or "")
+        telemetry_tracker = TelemetryTracker(storage=disk_gateway, rl_config=rl_config, session_dir=session_dir or "")
+        dashboard = TelemetryDashboard(headless=(selected_mode == ExecutionMode.TRAIN_HEADLESS), session_dir=session_dir or "")
         
         if selected_mode == ExecutionMode.SHOWCASE and not disk_gateway.exists(brain_archive.best_filename):
             cli_logger.warning(
-                "WARNING: Running in SHOWCASE mode without a trained champion model! "
+                f"WARNING: Running SHOWCASE mode without a trained champion model in '{session_dir or 'root'}'! "
                 "The agent will not explore and will default to holding LEFT."
             )
             
@@ -358,16 +382,18 @@ if __name__ == "__main__":
                 archive=brain_archive,
                 use_champion=(selected_mode == ExecutionMode.SHOWCASE)
             ),
-            dashboard=TelemetryDashboard(headless=(selected_mode == ExecutionMode.TRAIN_HEADLESS)),
+            dashboard=dashboard,
             tracker=telemetry_tracker
         )
         
         director.execute_loop() 
         
     except Exception as exc:
-        offending_val = exc.args[0] if exc.args else "Unknown"
+        offending_val = exc.args[0] if exc.args else str(exc)
         cli_logger.error(
             f"Fatal error during execution. Offending value: {offending_val}. "
-            "Expected shape: Valid internal domain execution state progression."
+            "Expected shape: Valid internal domain execution state progression. "
+            "Check 'arkanoid_debug.log' for the complete traceback."
         )
+        debug_logger.error(f"Full traceback:\n{traceback.format_exc()}")
         sys.exit(1)

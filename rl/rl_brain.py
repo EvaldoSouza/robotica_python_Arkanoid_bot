@@ -1,5 +1,6 @@
 import random
 import numpy as np
+import os
 from typing import Tuple, Optional
 from dataclasses import dataclass
 
@@ -79,10 +80,10 @@ class RewardShaper:
 
 
 class BrainArchive:
-    def __init__(self, storage: StorageGateway, filename: str = "arkanoid_brain.pkl") -> None:
+    def __init__(self, storage: StorageGateway, session_dir: str = "", filename: str = "arkanoid_brain.pkl") -> None:
         self.storage = storage
-        self.filename = filename
-        self.best_filename = "arkanoid_best_brain.pkl"
+        self.filename = os.path.join(session_dir, filename) if session_dir else filename
+        self.best_filename = os.path.join(session_dir, "arkanoid_best_brain.pkl") if session_dir else "arkanoid_best_brain.pkl"
 
     def load_brain(self, expected_shape: Tuple[int, ...]) -> Tuple[np.ndarray, float, int]:
         if not self.storage.exists(self.filename):
