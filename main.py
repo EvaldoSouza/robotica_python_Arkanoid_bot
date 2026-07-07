@@ -175,7 +175,11 @@ class ArkanoidOrchestrator:
         self.brain = brain
         self.dashboard = dashboard
         
-        self.frame_skip = 4
+        # Action Repeat Logic: The bot holds its decision for 5 frames
+        self.frames_per_decision = 5
+        self.current_action = 0
+        self.accumulated_reward = 0.0
+        
         self.is_running = True
         self.tracker = tracker
         self.memory_snapshot: bytes = b""
@@ -194,22 +198,32 @@ class ArkanoidOrchestrator:
 
     def _process_single_frame(self, frame_idx: int) -> None:
         level_saved = bool(self.memory_snapshot)
-        self.emulator.apply_input(self.tracker.prev_action, self.frame_skip, frame_idx, level_saved)
+        
+        # 1. Step emulator exactly 1 frame at a time to never miss a fast bounce
+        self.emulator.apply_input(self.current_action, 1, frame_idx, level_saved)
         frame_matrix = self.emulator.extract_frame()
         
         perception = self.vision.process_game_frame(frame_matrix)
         self._ensure_level_checkpoint(perception)
         
-        reward = self._compute_instant_reward(perception)
-        if reward <= -100.0:
-            self._handle_agent_death(reward)
+        step_reward = self._compute_instant_reward(perception)
+        self.accumulated_reward += step_reward
+        
+        if self.accumulated_reward <= -100.0:
+            self._handle_agent_death(self.accumulated_reward)
+            self.accumulated_reward = 0.0
             return
 
-        self.tracker.record_step(perception, reward, level_saved)
-        next_action = self._determine_next_action(perception, reward)
-        
-        self._render_output_if_needed(frame_idx, frame_matrix, perception, reward)
-        self.tracker.shift_historical_state(perception, next_action)
+        self._render_output_if_needed(frame_idx, frame_matrix, perception, step_reward)
+
+        # 2. Agent Decision Step: Evaluate and change action only every 5 frames
+        if frame_idx % self.frames_per_decision == 0:
+            self.tracker.record_step(perception, self.accumulated_reward, level_saved)
+            self.current_action = self._determine_next_action(perception, self.accumulated_reward)
+            self.tracker.shift_historical_state(perception, self.current_action)
+            
+            # Reset reward buffer for the next window
+            self.accumulated_reward = 0.0
 
     def _ensure_level_checkpoint(self, perception: FramePerception) -> None:
         if self.memory_snapshot:
