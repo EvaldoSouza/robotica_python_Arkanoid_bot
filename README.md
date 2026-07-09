@@ -105,3 +105,33 @@ arkanoid_best_brain.pkl: The "champion" model, saved whenever the agent breaks i
 telemetry_history.pkl & telemetry_raw.json: The long-term training metrics data.
 
 telemetry_chart.png: An automatically updated visual graph of the agent's progress.
+
+Inspecting the Agent's Brain
+
+If you want to view the raw numbers of the entire Q-table matrix and current hyperparameters (like the exploration rate), you can use a standalone inspection script.
+
+Create a file named inspect_brain.py in your root directory with the following code:
+
+import pickle
+import numpy as np
+import sys
+
+# Change this path to point to the specific session file you want to inspect
+FILE_PATH = "arkanoid_best_brain.pkl" 
+
+with open(FILE_PATH, "rb") as f:
+    payload = pickle.load(f)
+
+# Set NumPy to print the whole array without truncating it
+np.set_printoptions(threshold=sys.maxsize, suppress=True)
+
+print("--- Brain Data ---")
+print(f"Exploration Rate (Epsilon): {payload['epsilon']:.4f}")
+print(f"Best Survival Frames: {payload['best_survival']}")
+print("\n--- Q-Table ---")
+print(payload['q_table'])
+
+
+Then, simply run it from your terminal:
+
+python inspect_brain.py
