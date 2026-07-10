@@ -11,11 +11,11 @@ StateVector = Tuple[int]
 
 @dataclass(frozen=True)
 class RlConfig:
-    alpha: float = 0.1
+    alpha: float = 0.15
     gamma: float = 0.95
     epsilon_start: float = 1.0
     epsilon_min: float = 0.05
-    epsilon_decay: float = 0.995
+    epsilon_decay: float = 0.998
     q_dims: Tuple[int, ...] = (5, 3)
     paddle_y: float = 212.0
     left_wall: float = 16.0

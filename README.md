@@ -1,43 +1,51 @@
-Arkanoid Reinforcement Learning Agent
+# Agente de Aprendizado por Reforço para Arkanoid
 
-This project implements a Reinforcement Learning (RL) agent that learns to play the NES classic Arkanoid. Using a custom Domain-Driven Design (DDD) architecture, it bridges the nes-py emulator, an OpenCV-based computer vision pipeline, and a custom Q-Learning algorithm (using Watkins's TD(λ)) to train an AI to master the game from raw pixel data.
+Este projeto implementa um agente de Aprendizado por Reforço (RL - Reinforcement Learning) que aprende a jogar o clássico do NES, Arkanoid. Utilizando uma arquitetura baseada em Domain-Driven Design (DDD), o projeto conecta o emulador nes-py, um pipeline de visão computacional baseado em OpenCV e um algoritmo personalizado de Q-Learning para treinar uma Inteligência Artificial a dominar o jogo a partir dos pixels brutos da tela.
 
-Features
+## Funcionalidades
 
-Custom Computer Vision Pipeline: Extracts sub-pixel coordinates, velocities, and ball trajectories directly from the raw emulator frame, avoiding RAM-injection hacks.
+*   **Pipeline de Visão Computacional Personalizado:** Extrai coordenadas sub-pixel, velocidades e trajetórias da bola diretamente do frame bruto do emulador, evitando hacks de injeção de RAM.
+*   **Cérebro Q-Learning:** Implementa um simples algoritmo greedy de aprendizado por reforço.
+*   **Dashboard de Telemetria ao Vivo:** Um painel em OpenCV rodando a 60 FPS mostrando o jogo, a representação de visão em cores falsas do agente e gráficos de valor-Q em tempo real.
+*   **Métricas de Longo Prazo:** Integração com Matplotlib para rastrear recompensas episódicas, frames de sobrevivência e decaimento da exploração ao longo do tempo.
 
-TD(λ) Q-Learning Brain: Implements Watkins's replacing traces and custom reward shaping to teach the agent physics-based survival.
+---
 
-Live Telemetry Dashboard: A 60 FPS OpenCV dashboard showing the game, the agent's false-color vision representation, and real-time Q-value charts.
+## Arquitetura e Estrutura Interna
 
-Long-term Metrics: Matplotlib integration to track episodic rewards, survival frames, and exploration decay over time.
+O sistema foi redesenhado visando responsabilidade única e estabilidade no treinamento. Os componentes centrais englobam:
 
-Project Structure
+*   **Orquestração e Execução (`main.py`):** O `ArkanoidOrchestrator` executa o loop central interagindo com o emulador. Ele utiliza *Action Repeats* (atualizando as decisões do agente a cada 5 frames) e gerencia checkpoints de estado em memória para resetar a partida instantaneamente em caso de erro sem precisar recarregar todo o emulador.
+*   **Cérebro RL (`rl/`):** 
+    *   `ArkanoidBrain`: A fachada do agente, atuando com a política de escolha.
+    *   `StateDiscretizer`: Reduz a complexidade da visão da tela transformando posições contínuas em *bins* de estado discretos baseados na distância em X entre a raquete e a trajetória da bola.
+    *   `RewardShaper`: Fornece *sparse rewards*, pontuando rebotes na raquete (identificados pelas mudanças de vetores da bola) e penalizando severamente quedas (ausência de bola na tela).
+*   **Renderização e Dashboard (`display/`):** Combinando visualização tática e estratégica. O `LiveRenderer` gera o display OpenCV em "tempo real", com gráficos de predição do valor-Q, enquanto o `MetricsRenderer` monitora e plota as curvas de sobrevivência e ganho de confiança do algoritmo usando Matplotlib.
+*   **Persistência Seguro (`storage_gateway.py`):** Utiliza um padrão Gateway (`LocalDiskStorage`) para persistir automaticamente telemetria, configurações e o aprendizado contínuo (Matriz-Q e Epsilon) dentro de um diretório de sessão segura, garantindo que o treinamento possa ser pausado e retomado.
 
-main.py: The main orchestrator connecting all domain modules.
+---
 
-rl/: Contains the RL Brain, TD(λ) policy, state discretizer, and reward shaper.
+## Estrutura do Projeto
 
-vision/: OpenCV-based physics environment that tracks the ball, paddle, and blocks.
+*   `main.py`: O orquestrador principal conectando todos os módulos do domínio.
+*   `rl/`: Contém o Cérebro RL, a política TD(λ) implementada via Q-Learning, o discretizador de estado e o modelador de recompensa.
+*   `vision/`: Ambiente de física baseado em OpenCV que rastreia a bola, a raquete e os blocos.
+*   `emulator/`: Adaptador para a engine nes-py e tradutor de entrada via bitmask.
+*   `display/`: Os componentes de interface (Dashboard ao vivo em OpenCV e métricas em Matplotlib).
+*   `domain/`: Modelos de dados compartilhados (ex: FramePerception, Coordinate).
 
-emulator/: Adapter for the nes-py engine and bitmask input translator.
+## Pré-requisitos
 
-display/: The UI components (Live OpenCV dashboard and Matplotlib metrics).
+*   Python 3.12 (recomendado)
+*   Um arquivo de ROM do Arkanoid para NES chamado `arkanoid.nes` colocado no diretório `roms/`.
 
-domain/: Shared data models (e.g., FramePerception, Coordinate).
+## Instalação
 
-Prerequisites
+Para evitar erros de conflito de versão (especialmente com a biblioteca gym), é altamente recomendado usar um ambiente virtual e instalar as dependências exatas fixadas no projeto.
 
-Python 3.12 (recommended)
+Crie e ative um ambiente virtual:
 
-An Arkanoid NES ROM file named arkanoid.nes placed in the roms/ directory.
-
-Installation
-
-To avoid version mismatch errors (especially with the gym library), it is highly recommended to use a virtual environment and install the exact locked dependencies.
-
-Create and activate a virtual environment:
-
+```bash
 # Linux/macOS
 python3 -m venv venv
 source venv/bin/activate
@@ -45,63 +53,57 @@ source venv/bin/activate
 # Windows
 python -m venv venv
 venv\Scripts\activate
+```
 
+Instale as dependências exatas a partir do arquivo de requirements:
 
-Install the exact dependencies from the requirements file:
-
+```bash
 pip install -r requirements.txt
+```
 
+## Como Executar
 
-(For more details on environment sharing and troubleshooting, refer to VENV_GUIDE.md).
+O orquestrador é controlado pelo argumento `--mode`.
 
-How to Run
-
-The orchestrator is driven by the --mode argument.
-
-1. Showcase Mode (Default)
-
-Watch a pre-trained agent play the game optimally without exploring or updating its Q-table.
-
-# Run using a model in the root directory:
+### 1. Modo de Demonstração (Showcase - Padrão)
+Assista a um agente pré-treinado jogar de forma otimizada sem explorar ou atualizar sua tabela-Q.
+```bash
+# Executa usando um modelo no diretório raiz:
 python main.py --mode showcase
 
-# Run using a specific trained session's champion model:
+# Executa usando o modelo campeão de uma sessão específica:
 python main.py --mode showcase --session sessions/run_YYYYMMDD_HHMMSS
+```
 
-
-2. UI Training Mode
-
-Train the agent from scratch while rendering the live game, agent vision, and Q-value decision bars. Automatically creates a timestamped session folder in sessions/.
-
+### 2. Modo de Treinamento com UI (Train UI)
+Treine o agente do zero enquanto renderiza o jogo ao vivo, a visão do agente e as barras de decisão de valor-Q. Cria automaticamente uma pasta de sessão com data e hora.
+```bash
 python main.py --mode train_ui
+```
 
-
-3. Headless Training Mode
-
-Train the agent as fast as possible by disabling the OpenCV visualization. Ideal for leaving the agent to learn in the background. It will still output telemetry to the console and update the metrics charts at the end of episodes. Automatically creates a timestamped session folder in sessions/.
-
+### 3. Modo de Treinamento Sem Interface (Headless)
+Treine o agente o mais rápido possível desativando a visualização do OpenCV. Exibirá telemetria no console e atualizará gráficos ao final dos episódios.
+```bash
 python main.py --mode train_headless
+```
 
-
-4. Resuming a Training Session
-
-To continue training from a previous run (either in UI or Headless mode), pass the --session flag pointing to the specific timestamped directory. This seamlessly loads the exact Q-table, exploration rate (epsilon), and historical telemetry to pick up right where it left off.
-
-# Resume with UI:
+### 4. Retomando uma Sessão de Treinamento
+Para continuar o treinamento de uma execução anterior, passe a flag `--session` apontando para o diretório específico gerado. Isso carrega de forma transparente a tabela-Q exata e a telemetria histórica para continuar de onde o agente parou.
+```bash
 python main.py --mode train_ui --session sessions/run_YYYYMMDD_HHMMSS
+```
 
-# Resume headless:
-python main.py --mode train_headless --session sessions/run_YYYYMMDD_HHMMSS
+## Checkpoints e Persistência
 
+O módulo RL salva automaticamente seu progresso na pasta da sessão ativa:
+*   `arkanoid_brain.pkl`: O modelo sendo atualizado continuamente.
+*   `arkanoid_best_brain.pkl`: O modelo "campeão", salvo quando o agente quebra seu próprio recorde de sobrevivência.
+*   `telemetry_history.pkl` & `telemetry_raw.json`: Dados de métricas de treinamento.
+*   `telemetry_chart.png`: Gráfico visual do progresso, atualizado automaticamente.
 
-Checkpoints and Persistence
+## Inspecionando o Cérebro do Agente
 
-The RL module automatically saves its progress to the active session folder:
-
-arkanoid_brain.pkl: The continuously updated model.
-
-arkanoid_best_brain.pkl: The "champion" model, saved whenever the agent breaks its own survival record.
-
-telemetry_history.pkl & telemetry_raw.json: The long-term training metrics data.
-
-telemetry_chart.png: An automatically updated visual graph of the agent's progress.
+Se quiser ver os números brutos da matriz da tabela-Q e os hiperparâmetros (como exploração), use o script de inspeção autônomo.
+```bash
+python inspect_brain.py
+```
